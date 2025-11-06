@@ -36,7 +36,7 @@ A CLI tool to manage git worktrees with Python virtual environments, designed fo
 
 ### Create a worktree
 
-Creates a new git worktree with a branch and Python venv:
+Creates a new git worktree with a branch and Python venv, then automatically opens it in VS Code:
 
 ```bash
 # From within a git repository
@@ -50,12 +50,13 @@ This creates:
 - Worktree at `~/worktrees/<gitname>/<name>/`
 - Branch named `worktree/<name>`
 - Python venv at `~/worktrees/<gitname>/<name>/.venv`
+- Automatically opens the worktree in VS Code
 
 Example:
 ```bash
 cd ~/projects/myapp
 contxt create feature-auth
-# Creates ~/worktrees/myapp/feature-auth/
+# Creates ~/worktrees/myapp/feature-auth/ and opens in VS Code
 ```
 
 ### Open worktree in VS Code
@@ -86,11 +87,15 @@ otherproject
 
 ### Merge worktree branch
 
-Merges the worktree's branch into the main branch of the original repository:
+Merges the worktree's branch into the main branch of the original repository. Can be run from anywhere, including from within the worktree itself:
 
 ```bash
 contxt merge <name>
 contxt merge <name> -p <project>
+
+# From within a worktree directory
+cd ~/worktrees/myapp/feature-auth
+contxt merge feature-auth  # Automatically detects project
 ```
 
 ### Delete a worktree
@@ -100,7 +105,7 @@ contxt delete <name>
 contxt delete <name> -p <project>
 ```
 
-This removes the worktree, deletes the branch, and cleans up metadata.
+This removes the worktree from git tracking, deletes the branch, and moves the worktree directory to `/tmp/contxt_deleted/` for recovery. The directory will be automatically cleaned up on next system reboot.
 
 ## How It Works
 
@@ -141,6 +146,9 @@ contxt delete ai-integration
 
 ## Notes
 
+- **Smart Context Detection**: Commands automatically detect when you're running from within a worktree and use the correct project name
+- **Automatic VS Code**: The `create` command automatically opens the new worktree in VS Code
+- **Safe Deletion**: Deleted worktrees are moved to `/tmp/contxt_deleted/` instead of being permanently deleted, allowing recovery if needed
 - The `-p` flag allows you to work with worktrees from different projects without being in the original repository
-- Metadata is persisted across sessions, so you can manage worktrees from anywhere
+- Metadata is persisted across sessions in `~/worktrees/.contxt_metadata.json`
 - Virtual environments are created using `python3 -m venv`

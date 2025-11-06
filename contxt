@@ -8,8 +8,10 @@ import sys
 import json
 import argparse
 import subprocess
+import shutil
+import datetime
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple
 
 
 class ContxtManager:
@@ -55,6 +57,19 @@ class ContxtManager:
         if git_root is None:
             git_root = self._get_git_root()
         return git_root.name
+
+    def _find_worktree_info(self, cwd: Path) -> Optional[Tuple[str, str]]:
+        """
+        Check if current directory is inside a worktree and return (git_name, worktree_name).
+        Returns None if not in a tracked worktree.
+        """
+        cwd_str = str(cwd)
+        for git_name, worktrees in self.metadata.items():
+            for wt_name, wt_info in worktrees.items():
+                wt_path = wt_info['worktree_path']
+                if cwd_str.startswith(wt_path):
+                    return (git_name, wt_name)
+        return None
 
     def _get_current_branch(self, git_root: Path) -> str:
         """Get the current branch name"""
@@ -124,9 +139,31 @@ class ContxtManager:
         print(f"\nTo activate venv:")
         print(f"  source {venv_path}/bin/activate")
 
+        # Open in VS Code
+        try:
+            subprocess.run(['code', str(worktree_path)], check=True)
+            print(f"\nOpened '{name}' in VS Code")
+        except subprocess.CalledProcessError as e:
+            print(f"\nWarning: Failed to open VS Code: {e}", file=sys.stderr)
+        except FileNotFoundError:
+            print("\nWarning: 'code' command not found. Install VS Code CLI to auto-open.", file=sys.stderr)
+
     def edit(self, name: str, project: Optional[str] = None):
         """Open worktree in VS Code"""
-        git_name = project if project else self._get_git_name()
+        # Check if we're in a worktree and use its git_name
+        cwd = Path.cwd()
+        worktree_info_tuple = self._find_worktree_info(cwd)
+
+        if project:
+            git_name = project
+        elif worktree_info_tuple:
+            git_name, _ = worktree_info_tuple
+        else:
+            try:
+                git_name = self._get_git_name()
+            except SystemExit:
+                print("Error: Not in a git repository. Use -p to specify project.", file=sys.stderr)
+                sys.exit(1)
 
         if git_name not in self.metadata or name not in self.metadata[git_name]:
             print(f"Error: Worktree '{name}' not found for project '{git_name}'", file=sys.stderr)
@@ -149,8 +186,21 @@ class ContxtManager:
             sys.exit(1)
 
     def delete(self, name: str, project: Optional[str] = None):
-        """Delete a worktree"""
-        git_name = project if project else self._get_git_name()
+        """Delete a worktree by moving it to /tmp"""
+        # Check if we're in a worktree and use its git_name
+        cwd = Path.cwd()
+        worktree_info_tuple = self._find_worktree_info(cwd)
+
+        if project:
+            git_name = project
+        elif worktree_info_tuple:
+            git_name, _ = worktree_info_tuple
+        else:
+            try:
+                git_name = self._get_git_name()
+            except SystemExit:
+                print("Error: Not in a git repository. Use -p to specify project.", file=sys.stderr)
+                sys.exit(1)
 
         if git_name not in self.metadata or name not in self.metadata[git_name]:
             print(f"Error: Worktree '{name}' not found for project '{git_name}'", file=sys.stderr)
@@ -161,18 +211,30 @@ class ContxtManager:
         original_repo = worktree_info['original_repo']
         branch_name = worktree_info['branch']
 
-        # Remove git worktree
+        # Create timestamped backup location in /tmp
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+        tmp_base = Path('/tmp') / 'contxt_deleted'
+        tmp_base.mkdir(parents=True, exist_ok=True)
+        backup_path = tmp_base / f"{git_name}_{name}_{timestamp}"
+
+        # Remove from git worktree tracking first
         try:
             subprocess.run(
-                ['git', '-C', original_repo, 'worktree', 'remove', str(worktree_path)],
-                check=True
+                ['git', '-C', original_repo, 'worktree', 'remove', '--force', str(worktree_path)],
+                check=True,
+                capture_output=True
             )
         except subprocess.CalledProcessError as e:
             print(f"Warning: Failed to remove worktree via git: {e}", file=sys.stderr)
-            # Try force remove if directory still exists
-            if worktree_path.exists():
-                import shutil
-                shutil.rmtree(worktree_path)
+
+        # Move directory to /tmp instead of deleting
+        if worktree_path.exists():
+            try:
+                shutil.move(str(worktree_path), str(backup_path))
+                print(f"Moved worktree to: {backup_path}")
+                print(f"(Will be cleaned up on next reboot)")
+            except Exception as e:
+                print(f"Warning: Failed to move worktree to /tmp: {e}", file=sys.stderr)
 
         # Delete branch
         try:
@@ -213,7 +275,28 @@ class ContxtManager:
 
     def merge(self, name: str, project: Optional[str] = None):
         """Merge worktree branch into main branch of original repo"""
-        git_name = project if project else self._get_git_name()
+        # Check if we're currently in a worktree
+        cwd = Path.cwd()
+        worktree_info_tuple = self._find_worktree_info(cwd)
+
+        # Determine git_name and name
+        if project:
+            # Explicit project specified
+            git_name = project
+        elif worktree_info_tuple:
+            # We're in a tracked worktree - use the metadata's git_name
+            git_name, detected_name = worktree_info_tuple
+            # If name matches what we detected, we're trying to merge current worktree
+            if name == detected_name:
+                print(f"Detected current worktree: {git_name}/{name}")
+        else:
+            # Not in a worktree, try to get from current git repo
+            try:
+                git_name = self._get_git_name()
+            except SystemExit:
+                # Not in a git repo at all, must specify project
+                print("Error: Not in a git repository. Use -p to specify project.", file=sys.stderr)
+                sys.exit(1)
 
         if git_name not in self.metadata or name not in self.metadata[git_name]:
             print(f"Error: Worktree '{name}' not found for project '{git_name}'", file=sys.stderr)
