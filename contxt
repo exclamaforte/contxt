@@ -87,10 +87,30 @@ class ContxtManager:
         except subprocess.CalledProcessError:
             return "main"
 
-    def create(self, name: str, project: Optional[str] = None):
-        """Create a new worktree with venv"""
-        git_root = self._get_git_root()
-        git_name = project if project else self._get_git_name(git_root)
+    def _create_worktree_common(
+        self, name: str, project: Optional[str] = None
+    ) -> Tuple[str, Path, Path, str]:
+        """
+        Common logic for creating a worktree with venv.
+        Returns (git_name, worktree_path, venv_path, branch_name)
+        """
+        # Check if we're in a worktree and resolve to original repo
+        cwd = Path.cwd()
+        worktree_info_tuple = self._find_worktree_info(cwd)
+
+        if worktree_info_tuple and not project:
+            # We're in a worktree, resolve to original repo root
+            git_name_from_worktree, current_worktree_name = worktree_info_tuple
+            git_root = Path(
+                self.metadata[git_name_from_worktree][current_worktree_name][
+                    "original_repo"
+                ]
+            )
+            git_name = git_name_from_worktree
+        else:
+            # Not in a worktree or project explicitly specified
+            git_root = self._get_git_root()
+            git_name = project if project else self._get_git_name(git_root)
 
         # Create worktree directory structure
         worktree_parent = self.worktrees_base / git_name
@@ -152,6 +172,15 @@ class ContxtManager:
         print(f"  Venv: {venv_path}")
         print(f"\nTo activate venv:")
         print(f"  source {venv_path}/bin/activate")
+
+        return (git_name, worktree_path, venv_path, branch_name)
+
+    def create(self, name: str, project: Optional[str] = None):
+        """Create a new worktree with venv"""
+        # Use common worktree creation logic
+        git_name, worktree_path, venv_path, branch_name = self._create_worktree_common(
+            name, project
+        )
 
         # Open in VS Code
         try:
@@ -405,6 +434,30 @@ class ContxtManager:
             print("You may need to resolve conflicts manually")
             sys.exit(1)
 
+    def agent(self, name: str, task: str, project: Optional[str] = None):
+        """Create a new worktree with venv and launch Claude agent with task"""
+        # Use common worktree creation logic
+        git_name, worktree_path, venv_path, branch_name = self._create_worktree_common(
+            name, project
+        )
+
+        # Launch Claude agent with task
+        print(f"\nLaunching Claude agent with task: {task}")
+        try:
+            subprocess.run(
+                ["claude", "-D", str(worktree_path), task],
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"\nError running Claude: {e}", file=sys.stderr)
+            sys.exit(1)
+        except FileNotFoundError:
+            print(
+                "\nError: 'claude' command not found. Make sure Claude CLI is installed.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -452,6 +505,16 @@ def main():
         "-p", "--project", help="Project name (defaults to current git repo name)"
     )
 
+    # agent command
+    agent_parser = subparsers.add_parser(
+        "agent", help="Create a worktree and launch Claude agent with task"
+    )
+    agent_parser.add_argument("name", help="Name of the worktree")
+    agent_parser.add_argument("task", nargs="+", help="Task description for the agent")
+    agent_parser.add_argument(
+        "-p", "--project", help="Project name (defaults to current git repo name)"
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -470,6 +533,9 @@ def main():
         manager.list(args.project)
     elif args.command == "merge":
         manager.merge(args.name, args.project)
+    elif args.command == "agent":
+        task = " ".join(args.task)
+        manager.agent(args.name, task, args.project)
 
 
 if __name__ == "__main__":

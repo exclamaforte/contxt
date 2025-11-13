@@ -5,6 +5,7 @@ A CLI tool to manage git worktrees with Python virtual environments, designed fo
 ## Features
 
 - Create isolated worktrees with dedicated branches and Python venvs
+- Launch Claude agents in worktrees with specific tasks
 - Open worktrees in VS Code with a single command
 - List and manage multiple projects and worktrees
 - Merge worktree branches back to main
@@ -57,6 +58,31 @@ Example:
 cd ~/projects/myapp
 contxt create feature-auth
 # Creates ~/worktrees/myapp/feature-auth/ and opens in VS Code
+```
+
+### Create worktree with AI agent
+
+Creates a new git worktree with a branch and Python venv, then automatically launches Claude Code with your task description:
+
+```bash
+# From within a git repository
+contxt agent <name> <task description>
+
+# Specify project name explicitly
+contxt agent <name> <task description> -p <project>
+```
+
+This creates:
+- Worktree at `~/worktrees/<gitname>/<name>/`
+- Branch named `worktree/<name>`
+- Python venv at `~/venvs/<gitname>/<name>`
+- Automatically launches `claude` CLI in the worktree directory with your task
+
+Example:
+```bash
+cd ~/projects/myapp
+contxt agent add-auth "Add user authentication with JWT tokens"
+# Creates ~/worktrees/myapp/add-auth/ and launches Claude agent
 ```
 
 ### Open worktree in VS Code
@@ -143,6 +169,7 @@ contxt delete ai-integration
 - Python 3.6+
 - Git
 - VS Code with `code` CLI command (for `contxt edit`)
+- Claude CLI (for `contxt agent`)
 
 ## Notes
 
