@@ -20,8 +20,10 @@ class ContxtManager:
 
     def __init__(self):
         self.worktrees_base = Path.home() / "worktrees"
+        self.venvs_base = Path.home() / "venvs"
         self.metadata_file = self.worktrees_base / ".contxt_metadata.json"
         self.worktrees_base.mkdir(parents=True, exist_ok=True)
+        self.venvs_base.mkdir(parents=True, exist_ok=True)
         self.metadata = self._load_metadata()
 
     def _load_metadata(self) -> Dict:
@@ -123,8 +125,10 @@ class ContxtManager:
             print(f"Error creating worktree: {e}", file=sys.stderr)
             sys.exit(1)
 
-        # Create Python venv
-        venv_path = worktree_path / ".venv"
+        # Create Python venv in separate directory
+        venv_parent = self.venvs_base / git_name
+        venv_parent.mkdir(parents=True, exist_ok=True)
+        venv_path = venv_parent / name
         try:
             subprocess.run(["python3", "-m", "venv", str(venv_path)], check=True)
         except subprocess.CalledProcessError as e:
