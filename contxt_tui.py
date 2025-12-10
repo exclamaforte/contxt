@@ -141,13 +141,18 @@ class HelpScreen(ModalScreen):
   c           - Create new worktree
   d           - Delete worktree
   m           - Merge worktree to main
-  e           - Edit worktree in VS Code
+  e           - Edit worktree in configured editor
 
 [yellow]Other[/yellow]
   s           - Settings
   r           - Restart server
   ?           - Show this help
   q           - Quit
+
+[yellow]In screen session (when attached)[/yellow]
+  C-a then d  - Detach without killing agent
+  C-c         - Kill current command
+  exit        - Exit session
 
 Press ESC or q to close this help.""",
                 id="help-content",
@@ -450,13 +455,45 @@ class ContxtTUI(App):
         # Get worktree details
         path = worktree["path"]
         agent_cmd = self.config.get("agent_command", "bash")
+        session_name = f"contxt-{worktree['git_name']}-{worktree['name']}"
 
         # Suspend the TUI and attach to terminal
         # Use App's suspend() method via super() to avoid recursion
         with App.suspend(self):
-            # Launch shell in the worktree directory
             os.chdir(path)
-            subprocess.call([agent_cmd])
+
+            # Check if we're using screen
+            use_multiplexer = self.config.get("use_multiplexer", True)
+
+            if use_multiplexer and shutil.which("screen"):
+                # Check if screen session already exists
+                result = subprocess.run(
+                    ["screen", "-ls", session_name],
+                    capture_output=True,
+                    text=True
+                )
+
+                session_exists = session_name in result.stdout
+
+                if not session_exists:
+                    # Session doesn't exist, create it with agent command
+                    subprocess.run(
+                        ["screen", "-dmS", session_name, "bash", "-c",
+                         f"cd {path} && {agent_cmd}"]
+                    )
+                    # Give it a moment to start
+                    import time
+                    time.sleep(0.5)
+
+                # Attach to the session
+                print(f"\nAttaching to screen session '{session_name}'")
+                print("Press Ctrl-A then D to detach without killing the agent\n")
+                subprocess.call(["screen", "-r", session_name])
+            else:
+                # Fallback: run directly (Ctrl-C will kill it)
+                print(f"\nLaunching {agent_cmd} in {path}")
+                print("Note: Ctrl-C will kill the agent. Install screen for detachable sessions.\n")
+                subprocess.call([agent_cmd])
 
         # Refresh when returning
         self.refresh_worktrees()
@@ -468,16 +505,33 @@ class ContxtTUI(App):
 
         item = self.worktree_items[self.selected_index]
         worktree = item.worktree
+        session_name = f"contxt-{worktree['git_name']}-{worktree['name']}"
 
-        if worktree.get("status") == "stopped":
+        # Check if screen session exists
+        has_screen_session = False
+        if shutil.which("screen"):
+            result = subprocess.run(
+                ["screen", "-ls", session_name],
+                capture_output=True,
+                text=True
+            )
+            has_screen_session = session_name in result.stdout
+
+        if worktree.get("status") == "stopped" and not has_screen_session:
             self.notify("No active session to kill", severity="warning")
             return
 
         def do_kill():
+            # Kill screen session if it exists
+            if has_screen_session:
+                subprocess.run(["screen", "-X", "-S", session_name, "quit"],
+                             capture_output=True, stderr=subprocess.DEVNULL)
+
+            # Kill PTY session
             response = self.client.send_command({"cmd": "stop_session", "key": worktree["key"]})
-            if response and response.get("status") == "ok":
-                self.notify(f"Killed session for {worktree['name']}")
-                self.refresh_worktrees()
+
+            self.notify(f"Killed session for {worktree['name']}")
+            self.refresh_worktrees()
 
         if self.config.get("confirm_kill", True):
             self.push_screen(ConfirmDialog(f"Kill session for {worktree['name']}?", on_confirm=do_kill))

@@ -14,6 +14,7 @@ class ContxtConfig:
     DEFAULT_CONFIG = {
         "agent_command": "claude",
         "editor": "code",  # Editor command for opening worktrees
+        "use_multiplexer": True,  # Use screen for detachable sessions
         "navigation_mode": "default",  # default, vim, emacs
         "confirm_kill": True,
         "preview_lines": 1,
