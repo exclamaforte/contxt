@@ -1,11 +1,21 @@
 # contxt - Git Worktree Manager for AI Agents
 
-A CLI tool to manage git worktrees with Python virtual environments, designed for AI agent workflows.
+A powerful TUI-based manager for git worktrees with Python virtual environments, designed to help you multitask across multiple AI agent sessions.
 
 ## Features
 
+### TUI Interface
+- **Rich Terminal Interface**: Beautiful Textual-based TUI for managing worktrees
+- **Persistent Terminal Sessions**: Long-running sessions for each worktree
+- **Activity Monitoring**: Visual indicators showing which agents are actively working
+- **Real-time Output Preview**: See the latest output from each terminal session
+- **Multiple Navigation Modes**: Default (arrows/tab), Vim (j/k), and Emacs (C-n/C-p)
+- **Quick Actions**: Create, delete, merge, and edit worktrees with simple hotkeys
+- **Configurable Settings**: Customize agent commands, preview lines, and more
+
+### Core Features
 - Create isolated worktrees with dedicated branches and Python venvs
-- Launch Claude agents in worktrees with specific tasks
+- Launch AI agents in worktrees with specific tasks
 - Open worktrees in VS Code with a single command
 - List and manage multiple projects and worktrees
 - Merge worktree branches back to main
@@ -33,7 +43,55 @@ A CLI tool to manage git worktrees with Python virtual environments, designed fo
    contxt --help
    ```
 
-## Usage
+5. Install Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+## TUI Quick Start
+
+```bash
+# Launch TUI (default behavior)
+contxt
+
+# Or explicitly
+contxt tui
+```
+
+### TUI Navigation & Hotkeys
+
+**Navigation** (default mode uses arrows/tab, press `s` for settings to change):
+- `↑`/`↓` or `Tab`/`Shift+Tab`: Navigate between worktrees
+- `j`/`k`: Vim mode navigation
+- `Ctrl+n`/`Ctrl+p`: Emacs mode navigation
+
+**Actions**:
+- `Enter`: Attach to terminal session (launches agent in worktree)
+- `e`: Edit worktree in configured editor
+- `x`: Kill terminal session
+- `c`: Create new worktree
+- `d`: Delete worktree
+- `m`: Merge worktree to main
+- `s`: Open settings
+- `r`: Restart server
+- `?`: Show help
+- `q`: Quit
+
+**Status Colors**:
+- 🟡 **Yellow**: Agent is actively working
+- 🟢 **Green**: Terminal session is idle
+- 🔴 **Red**: No terminal session
+
+### Settings
+
+Press `s` in the TUI to configure:
+- **Agent Command**: Which agent to run when attaching (claude, codex, gemini, etc.)
+- **Editor Command**: Which editor to open worktrees with (code, vim, nvim, etc.)
+- **Navigation Mode**: Default, Vim, or Emacs keybindings
+- **Preview Lines**: How many lines of terminal output to show
+- **Confirm Kill**: Whether to ask for confirmation before killing sessions
+
+## CLI Usage
 
 ### Create a worktree
 

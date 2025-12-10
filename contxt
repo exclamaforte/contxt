@@ -467,6 +467,9 @@ def main():
 
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
+    # tui command (can be explicit, but also default)
+    tui_parser = subparsers.add_parser("tui", help="Launch TUI interface")
+
     # create command
     create_parser = subparsers.add_parser(
         "create", help="Create a new worktree with venv"
@@ -517,10 +520,22 @@ def main():
 
     args = parser.parse_args()
 
+    # If no command specified, launch TUI by default
     if not args.command:
-        parser.print_help()
-        sys.exit(1)
+        args.command = "tui"
 
+    if args.command == "tui":
+        # Launch the TUI
+        try:
+            from contxt_tui import main as tui_main
+            tui_main()
+        except ImportError as e:
+            print(f"Error: Failed to import TUI module: {e}", file=sys.stderr)
+            print("Make sure textual is installed: pip install textual", file=sys.stderr)
+            sys.exit(1)
+        return
+
+    # Handle other commands with ContxtManager
     manager = ContxtManager()
 
     if args.command == "create":
