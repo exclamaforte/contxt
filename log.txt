@@ -1,0 +1,18 @@
+checking contxt-tailscale-repro-claude
+session not found
+checking contxt-tailscale-foo-claude
+saving screen
+screen read
+hashing screen
+current hash 86a4fb46a1ac00454da11f16f1c1ca09
+screen hashed
+prev hash 86a4fb46a1ac00454da11f16f1c1ca09
+status idle
+checking contxt-tailscale-codex-claude
+saving screen
+screen read
+hashing screen
+current hash 078c53a48352b422c966e09077feb90d
+screen hashed
+prev hash 078c53a48352b422c966e09077feb90d
+status idle

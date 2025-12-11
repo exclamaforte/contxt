@@ -18,6 +18,7 @@ class ContxtConfig:
         "navigation_mode": "default",  # default, vim, emacs
         "confirm_kill": True,
         "preview_lines": 1,
+        "preview_skip_lines": 0,
         "server_host": "localhost",
         "server_port": 9876,
         "socket_path": str(Path.home() / ".contxt" / "server.sock"),
