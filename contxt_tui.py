@@ -661,10 +661,11 @@ class ContxtTUI(App):
         self.update_timer = None
         self.todos_file = Path.home() / "worktrees" / ".contxt_todos.json"
         self.todos: Dict[str, List[Dict]] = self.load_todos()
+        self.order_file = Path.home() / "worktrees" / ".contxt_order.json"
+        self.custom_order: List[str] = self.load_order()
         # Track screen content hashes for status detection
         self.screen_hashes: Dict[str, str] = {}
         self.screen_stable_since: Dict[str, float] = {}
-        self.custom_order: List[str] = []
 
     def compose(self) -> ComposeResult:
         """Create the layout"""
@@ -688,6 +689,22 @@ class ContxtTUI(App):
         self.todos_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self.todos_file, 'w') as f:
             json.dump(self.todos, f, indent=2)
+
+    def load_order(self) -> List[str]:
+        """Load custom order from file"""
+        if self.order_file.exists():
+            try:
+                with open(self.order_file, 'r') as f:
+                    return json.load(f)
+            except json.JSONDecodeError:
+                return []
+        return []
+
+    def save_order(self):
+        """Save custom order to file"""
+        self.order_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.order_file, 'w') as f:
+            json.dump(self.custom_order, f, indent=2)
 
     def on_mount(self):
         """Initialize when the app is mounted"""
@@ -1012,6 +1029,7 @@ class ContxtTUI(App):
         )
         self.selected_index = new_index
         self.custom_order = [item.worktree["key"] for item in self.worktree_items]
+        self.save_order()
         self._remount_worktree_items()
         self.update_selection()
 
