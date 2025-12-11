@@ -10,6 +10,7 @@ import time
 import socket
 import shutil
 import asyncio
+import shlex
 import hashlib
 import subprocess
 import tempfile
@@ -646,6 +647,8 @@ class ContxtTUI(App):
         Binding("ctrl+n", "cursor_down", "Down (Emacs)", show=False),
         Binding("tab", "cursor_down", "Next", show=False),
         Binding("shift+tab", "cursor_up", "Previous", show=False),
+        Binding("shift+up,K", "move_item_up", "Move Item Up", show=False),
+        Binding("shift+down,J", "move_item_down", "Move Item Down", show=False),
         Binding("enter", "attach_session", "Attach", show=False),
     ]
 
@@ -661,6 +664,7 @@ class ContxtTUI(App):
         # Track screen content hashes for status detection
         self.screen_hashes: Dict[str, str] = {}
         self.screen_stable_since: Dict[str, float] = {}
+        self.custom_order: List[str] = []
 
     def compose(self) -> ComposeResult:
         """Create the layout"""
@@ -713,10 +717,13 @@ class ContxtTUI(App):
 
         worktrees = response.get("worktrees", [])
 
-        # Clear existing items
+        selected_key = None
+        if self.worktree_items and 0 <= self.selected_index < len(self.worktree_items):
+            selected_key = self.worktree_items[self.selected_index].worktree["key"]
+
         container = self.query_one("#worktree-list")
         container.remove_children()
-        self.worktree_items.clear()
+        new_items: List[WorktreeItem] = []
 
         # Get all screen sessions if using multiplexer
         use_multiplexer = self.config.get("use_multiplexer", True)
@@ -741,7 +748,6 @@ class ContxtTUI(App):
 
         # Create items for each worktree and its sessions
         preview_lines = self.config.get("preview_lines", 1)
-        item_index = 0
         for wt in worktrees:
             git_name = wt["git_name"]
             wt_name = wt["name"]
@@ -767,15 +773,30 @@ class ContxtTUI(App):
                 wt_copy["agent"] = agent_name
                 wt_copy["key"] = f"{wt['key']}-{agent_name}"
                 item = WorktreeItem(wt_copy, preview_lines, on_select=self.handle_worktree_click)
-                item.set_selected(item_index == self.selected_index)
-                self.worktree_items.append(item)
-                container.mount(item)
-                item_index += 1
+                new_items.append(item)
 
-        # Ensure selection is valid
-        if self.worktree_items:
+        if not new_items:
+            self.worktree_items = []
+            self.custom_order = []
+            self.selected_index = 0
+            return
+
+        self._update_custom_order(new_items)
+        self.worktree_items = self._order_items_by_custom(new_items)
+
+        if selected_key:
+            for idx, item in enumerate(self.worktree_items):
+                if item.worktree["key"] == selected_key:
+                    self.selected_index = idx
+                    break
+            else:
+                self.selected_index = min(self.selected_index, len(self.worktree_items) - 1)
+        else:
             self.selected_index = min(self.selected_index, len(self.worktree_items) - 1)
-            self.update_selection()
+
+        for idx, item in enumerate(self.worktree_items):
+            item.set_selected(idx == self.selected_index)
+            container.mount(item)
 
     def update_worktree_status(self):
         """Update the status and output of all worktrees"""
@@ -938,10 +959,69 @@ class ContxtTUI(App):
 
         return normalized
 
+    def _update_custom_order(self, items: List[WorktreeItem]):
+        """Reconcile the tracked order with the current set of worktree items."""
+        new_keys = [item.worktree["key"] for item in items]
+        ordered_keys = [key for key in self.custom_order if key in new_keys]
+        for key in new_keys:
+            if key not in ordered_keys:
+                ordered_keys.append(key)
+        self.custom_order = ordered_keys
+
+    def _order_items_by_custom(self, items: List[WorktreeItem]) -> List[WorktreeItem]:
+        """Return items sorted by the tracked custom order."""
+        order_index = {key: idx for idx, key in enumerate(self.custom_order)}
+        return sorted(items, key=lambda item: order_index.get(item.worktree["key"], len(order_index)))
+
+    def _remount_worktree_items(self):
+        """Re-render the worktree list to reflect any ordering changes."""
+        container = self.query_one("#worktree-list")
+        # Get current children in container
+        current_children = list(container.children)
+
+        # Reorder children in the DOM to match worktree_items order
+        for idx, item in enumerate(self.worktree_items):
+            current_pos = current_children.index(item)
+            if current_pos != idx:
+                # Move this child to the correct position
+                if idx == 0:
+                    container.move_child(item, before=current_children[0])
+                else:
+                    container.move_child(item, after=self.worktree_items[idx - 1])
+                # Update our tracking of current positions
+                current_children.remove(item)
+                current_children.insert(idx, item)
+            item.set_selected(idx == self.selected_index)
+
     def update_selection(self):
         """Update which item is selected"""
         for i, item in enumerate(self.worktree_items):
             item.set_selected(i == self.selected_index)
+
+    def _move_selected_item(self, delta: int):
+        """Reorder the selected worktree by the specified offset."""
+        if not self.worktree_items:
+            return
+        new_index = self.selected_index + delta
+        if new_index < 0 or new_index >= len(self.worktree_items):
+            return
+
+        self.worktree_items[self.selected_index], self.worktree_items[new_index] = (
+            self.worktree_items[new_index],
+            self.worktree_items[self.selected_index],
+        )
+        self.selected_index = new_index
+        self.custom_order = [item.worktree["key"] for item in self.worktree_items]
+        self._remount_worktree_items()
+        self.update_selection()
+
+    def action_move_item_up(self):
+        """Move the selected worktree up one slot"""
+        self._move_selected_item(-1)
+
+    def action_move_item_down(self):
+        """Move the selected worktree down one slot"""
+        self._move_selected_item(1)
 
     def handle_worktree_click(self, item: WorktreeItem):
         """Update selection when a worktree item is clicked"""
@@ -989,6 +1069,25 @@ class ContxtTUI(App):
         # Save todos when returning from the screen
         self.save_todos()
 
+    def _agent_requires_shell_on_exit(self, agent_cmd: str) -> bool:
+        """Determine if the agent should leave an interactive shell running after exit."""
+        try:
+            parsed = shlex.split(agent_cmd)
+        except ValueError:
+            parsed = agent_cmd.split()
+        if not parsed:
+            return False
+        base_name = Path(parsed[0]).name
+        return base_name in {"claude", "codex"}
+
+    def _build_agent_launch_command(self, path: str, agent_cmd: str) -> str:
+        """Build the shell command used to launch the agent session."""
+        quoted_path = shlex.quote(path)
+        command = f"cd {quoted_path} && {agent_cmd}"
+        if self._agent_requires_shell_on_exit(agent_cmd):
+            command = f"{command}; exec bash"
+        return command
+
     def action_attach_session(self):
         """Attach to the selected worktree's terminal"""
         if not self.worktree_items or self.selected_index >= len(self.worktree_items):
@@ -1007,6 +1106,7 @@ class ContxtTUI(App):
         # Get worktree details
         path = worktree["path"]
         agent_cmd = self.config.get("agent_command", "bash")
+        launch_cmd = self._build_agent_launch_command(path, agent_cmd)
         # Use the agent name stored in the worktree dict (from screen session or default)
         agent_name = worktree.get("agent", agent_cmd.split()[0].split('/')[-1])
         session_name = f"contxt-{worktree['git_name']}-{worktree['name']}-{agent_name}"
@@ -1034,8 +1134,7 @@ class ContxtTUI(App):
                     if not session_exists:
                         # Session doesn't exist, create it with agent command
                         subprocess.run(
-                            ["screen", "-dmS", session_name, "bash", "-c",
-                             f"cd {path} && {agent_cmd}"]
+                            ["screen", "-dmS", session_name, "bash", "-c", launch_cmd]
                         )
                         # Give it a moment to start
                         time.sleep(1.0)
@@ -1077,8 +1176,8 @@ class ContxtTUI(App):
                 else:
                     # Fallback: run directly (Ctrl-C will kill it)
                     print(f"\nLaunching {agent_cmd} in {path}")
-                    print("Note: Ctrl-C will kill the agent. Install screen for detachable sessions.\n")
-                    subprocess.call([agent_cmd])
+                    print("Note: Ctrl-C will only exit the agent, the shell will remain open.\n")
+                    subprocess.call(["bash", "-c", launch_cmd])
         finally:
             os.chdir(original_cwd)
 
@@ -1283,7 +1382,10 @@ def main():
 
     # Run the TUI
     app = ContxtTUI(config)
-    app.run()
+    try:
+        app.run()
+    finally:
+        os.system("cls" if os.name == "nt" else "clear")
 
 
 if __name__ == "__main__":
