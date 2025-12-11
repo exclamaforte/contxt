@@ -14,7 +14,7 @@ import hashlib
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Callable
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -69,13 +69,19 @@ class ServerClient:
 class WorktreeItem(Static):
     """A single worktree item in the list"""
 
-    def __init__(self, worktree: Dict, preview_lines: int = 1):
+    def __init__(
+        self,
+        worktree: Dict,
+        preview_lines: int = 1,
+        on_select: Optional[Callable[["WorktreeItem"], None]] = None,
+    ):
         super().__init__()
         self.worktree = worktree
         self.preview_lines = preview_lines
         self.selected = False
         self.last_output: List[str] = []
         self._render_buffer: Optional[str] = None
+        self._on_select = on_select
 
     def on_mount(self):
         """Update the display when mounted"""
@@ -142,6 +148,12 @@ class WorktreeItem(Static):
         """Set the selection state"""
         self.selected = selected
         self.update_display()
+
+    def on_click(self, event: events.Click) -> None:
+        """Handle mouse clicks by notifying the parent"""
+        event.stop()
+        if self._on_select:
+            self._on_select(self)
 
 
 class HelpScreen(ModalScreen):
@@ -754,7 +766,7 @@ class ContxtTUI(App):
                 wt_copy = wt.copy()
                 wt_copy["agent"] = agent_name
                 wt_copy["key"] = f"{wt['key']}-{agent_name}"
-                item = WorktreeItem(wt_copy, preview_lines)
+                item = WorktreeItem(wt_copy, preview_lines, on_select=self.handle_worktree_click)
                 item.set_selected(item_index == self.selected_index)
                 self.worktree_items.append(item)
                 container.mount(item)
@@ -930,6 +942,14 @@ class ContxtTUI(App):
         """Update which item is selected"""
         for i, item in enumerate(self.worktree_items):
             item.set_selected(i == self.selected_index)
+
+    def handle_worktree_click(self, item: WorktreeItem):
+        """Update selection when a worktree item is clicked"""
+        if item in self.worktree_items:
+            new_index = self.worktree_items.index(item)
+            if new_index != self.selected_index:
+                self.selected_index = new_index
+                self.update_selection()
 
     def action_cursor_up(self):
         """Move selection up"""
