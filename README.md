@@ -2,6 +2,8 @@
 
 A powerful TUI-based manager for git worktrees with Python virtual environments, designed to help you multitask across multiple AI agent sessions.
 
+![Contxt demo](assets/contxt-demo.gif)
+
 ## Features
 
 ### TUI Interface
@@ -89,6 +91,7 @@ Press `s` in the TUI to configure:
 - **Editor Command**: Which editor to open worktrees with (code, vim, nvim, etc.)
 - **Navigation Mode**: Default, Vim, or Emacs keybindings
 - **Preview Lines**: How many lines of terminal output to show
+- **Preview Skip Lines**: Trim the most recent prompt lines before showing previews
 - **Confirm Kill**: Whether to ask for confirmation before killing sessions
 
 ## CLI Usage
@@ -190,6 +193,21 @@ contxt delete <name> -p <project>
 ```
 
 This removes the worktree from git tracking, deletes the branch, and moves the worktree directory to `/tmp/contxt_deleted/` for recovery. The directory will be automatically cleaned up on next system reboot.
+
+## Recording a Demo GIF
+
+Want to show off Contxt? Use the included helper script to record a session and convert it into a GIF.
+
+1. Install [asciinema](https://asciinema.org/) (`pip install asciinema`) and optionally [agg](https://github.com/asciinema/agg) for GIF conversion.
+2. Run the recorder:
+   ```bash
+   scripts/record_demo.sh
+   ```
+   - This launches `contxt` inside `asciinema` and saves `records/contxt-demo.cast`.
+   - The script automatically creates `assets/contxt-demo.gif` when `agg` is available (tweak font/theme via `AGG_FONT_SIZE`, `AGG_THEME`, `AGG_SPEED` env vars).
+3. Commit the generated GIF at `assets/contxt-demo.gif` so the preview at the top of this README stays up to date.
+
+You can override the default command (`CONTXT_RECORD_COMMAND=contxt tui`) or output paths (`scripts/record_demo.sh custom.cast custom.gif`) as needed.
 
 ## How It Works
 
