@@ -14,6 +14,7 @@ import select
 import termios
 import threading
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple
 from collections import deque
@@ -167,6 +168,102 @@ class ContxtServer:
         # Load metadata to know about worktrees
         self.worktrees_base = Path.home() / "worktrees"
         self.metadata_file = self.worktrees_base / ".contxt_metadata.json"
+        self.todos_file = self.worktrees_base / ".contxt_todos.json"
+        self.todo_lock = threading.Lock()
+        self.todos: Dict[str, List[Dict]] = {}
+        self.todo_versions: Dict[str, int] = {}
+        self._load_todos()
+
+    def _ensure_todo_ids(self, todos: Dict[str, List[Dict]]) -> bool:
+        """Ensure each todo entry has a stable ID; returns True if modifications were made."""
+        changed = False
+        for todo_list in todos.values():
+            if not isinstance(todo_list, list):
+                continue
+            for todo in todo_list:
+                if isinstance(todo, dict) and "id" not in todo:
+                    todo["id"] = uuid.uuid4().hex
+                    changed = True
+        return changed
+
+    def _load_todos(self):
+        """Load todos from disk and normalize their structure."""
+        data: Dict[str, List[Dict]] = {}
+        if self.todos_file.exists():
+            try:
+                with open(self.todos_file, "r") as f:
+                    data = json.load(f)
+            except json.JSONDecodeError:
+                data = {}
+
+        if not isinstance(data, dict):
+            data = {}
+
+        changed = self._ensure_todo_ids(data)
+        with self.todo_lock:
+            self.todos = data
+            self.todo_versions = {key: 0 for key in self.todos.keys()}
+            if changed:
+                self._save_todos_locked()
+
+    def _save_todos_locked(self):
+        """Persist the current todo state to disk (expects the caller to hold the lock)."""
+        self.todos_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.todos_file, "w") as f:
+            json.dump(self.todos, f, indent=2)
+
+    def _copy_todos(self, key: Optional[str] = None):
+        """Return a shallow copy of todos for safe transmission to clients."""
+        if key is not None:
+            return [todo.copy() for todo in self.todos.get(key, [])]
+        return {k: [todo.copy() for todo in v] for k, v in self.todos.items()}
+
+    def _apply_todo_operations(self, key: str, operations: List[Dict]) -> Tuple[bool, Optional[str]]:
+        """Apply a list of operations to the todo list for a worktree."""
+        todo_list = self.todos.setdefault(key, [])
+
+        def find_todo(todo_id: str) -> Optional[Dict]:
+            for todo in todo_list:
+                if todo.get("id") == todo_id:
+                    return todo
+            return None
+
+        for op in operations:
+            if not isinstance(op, dict):
+                return False, "Invalid operation format"
+
+            op_type = op.get("op")
+
+            if op_type == "add":
+                text = op.get("text", "").strip()
+                if not text:
+                    return False, "Todo text cannot be empty"
+                todo = {
+                    "id": uuid.uuid4().hex,
+                    "text": text,
+                    "done": bool(op.get("done", False)),
+                }
+                todo_list.append(todo)
+            elif op_type == "set_done":
+                todo_id = op.get("id")
+                if not todo_id:
+                    return False, "Missing todo id for set_done"
+                todo = find_todo(todo_id)
+                if not todo:
+                    return False, "Todo not found"
+                todo["done"] = bool(op.get("done", False))
+            elif op_type == "delete":
+                todo_id = op.get("id")
+                if not todo_id:
+                    return False, "Missing todo id for delete"
+                todo = find_todo(todo_id)
+                if not todo:
+                    return False, "Todo not found"
+                todo_list.remove(todo)
+            else:
+                return False, f"Unknown operation '{op_type}'"
+
+        return True, None
 
     def load_worktrees(self) -> Dict:
         """Load worktree metadata"""
@@ -254,6 +351,48 @@ class ContxtServer:
             else:
                 response["status"] = "error"
                 response["message"] = "Session not found"
+
+        elif cmd == "get_todos":
+            key = message.get("key")
+            with self.todo_lock:
+                if key:
+                    response["todos"] = self._copy_todos(key)
+                    response["version"] = self.todo_versions.get(key, 0)
+                else:
+                    response["todos"] = self._copy_todos()
+                    response["versions"] = dict(self.todo_versions)
+
+        elif cmd == "update_todos":
+            key = message.get("key")
+            operations = message.get("operations", [])
+            expected_version = message.get("version")
+            if not key:
+                response["status"] = "error"
+                response["message"] = "Missing worktree key"
+            elif not isinstance(operations, list):
+                response["status"] = "error"
+                response["message"] = "Operations must be a list"
+            else:
+                with self.todo_lock:
+                    current_version = self.todo_versions.get(key, 0)
+                    if expected_version is not None and expected_version != current_version:
+                        response["status"] = "conflict"
+                        response["message"] = "Todo list out of date"
+                        response["version"] = current_version
+                        response["todos"] = self._copy_todos(key)
+                    else:
+                        success, error = self._apply_todo_operations(key, operations)
+                        if not success:
+                            response["status"] = "error"
+                            response["message"] = error or "Failed to update todos"
+                            response["todos"] = self._copy_todos(key)
+                            response["version"] = current_version
+                        else:
+                            new_version = current_version + 1
+                            self.todo_versions[key] = new_version
+                            self._save_todos_locked()
+                            response["todos"] = self._copy_todos(key)
+                            response["version"] = new_version
 
         elif cmd == "shutdown":
             self.running = False

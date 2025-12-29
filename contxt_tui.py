@@ -14,6 +14,7 @@ import shlex
 import hashlib
 import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 from typing import Optional, Dict, List, Callable
 
@@ -54,9 +55,18 @@ class ServerClient:
             self.socket.sendall(message)
 
             # Receive response
-            data = self.socket.recv(8192)
+            data = b""
+            while True:
+                chunk = self.socket.recv(8192)
+                if not chunk:
+                    break
+                data += chunk
+                if b"\n" in chunk:
+                    break
+
             if data:
-                return json.loads(data.decode().strip())
+                line = data.split(b"\n", 1)[0]
+                return json.loads(line.decode().strip())
         except Exception:
             return None
 
@@ -378,8 +388,9 @@ class AddTodoDialog(ModalScreen):
 class TodoItem(Static):
     """A single todo item"""
 
-    def __init__(self, text: str, done: bool = False):
+    def __init__(self, todo_id: str, text: str, done: bool = False):
         super().__init__()
+        self.todo_id = todo_id
         self.text = text
         self.done = done
 
@@ -414,22 +425,21 @@ class TodoListScreen(ModalScreen):
         Binding("down,j", "cursor_down", "Down", show=False),
     ]
 
-    def __init__(self, worktree_key: str, todos: List[Dict]):
+    def __init__(self, worktree_key: str, todos: Optional[List[Dict]] = None, version: int = 0):
         super().__init__()
         self.worktree_key = worktree_key
-        self.todos = todos
+        self.todos = [todo.copy() for todo in (todos or [])]
+        self.version = version
         self.todo_items: List[TodoItem] = []
         self.selected_index = 0
+        self.refresh_timer = None
 
     def compose(self) -> ComposeResult:
         """Create the todo list layout"""
         with Container(id="todo-dialog"):
             yield Static(f"[bold]Todos for {self.worktree_key}[/bold]", id="todo-title")
             with ScrollableContainer(id="todo-list"):
-                for todo in self.todos:
-                    item = TodoItem(todo["text"], todo.get("done", False))
-                    self.todo_items.append(item)
-                    yield item
+                pass
 
             yield Static(
                 "[dim]Space: Toggle  •  A: Add  •  D: Delete  •  ↑/↓: Navigate  •  ESC/Q: Close[/dim]",
@@ -441,7 +451,9 @@ class TodoListScreen(ModalScreen):
 
     def on_mount(self):
         """Initialize when mounted"""
-        self.update_selection()
+        self._rebuild_todo_items()
+        self.refresh_timer = self.set_interval(2.0, self.refresh_from_server)
+        self.refresh_from_server()
 
     def update_selection(self):
         """Update which item is selected"""
@@ -465,57 +477,129 @@ class TodoListScreen(ModalScreen):
 
     def action_toggle_selected(self):
         """Toggle the selected todo item"""
-        if self.todo_items and self.selected_index < len(self.todo_items):
-            self.todo_items[self.selected_index].toggle()
+        item = self._get_selected_item()
+        if item:
+            self._apply_operations([
+                {"op": "set_done", "id": item.todo_id, "done": not item.done}
+            ])
 
     def action_add_todo(self):
         """Add a new todo item"""
         def handle_todo(text: str):
             """Handle the returned todo text"""
             if text:
-                todo = {"text": text, "done": False}
-                self.todos.append(todo)
-                item = TodoItem(text, False)
-                self.todo_items.append(item)
-                container = self.query_one("#todo-list")
-                container.mount(item)
-                self.selected_index = len(self.todo_items) - 1
-                self.update_selection()
+                self._apply_operations([{"op": "add", "text": text}])
 
         self.app.push_screen(AddTodoDialog(), handle_todo)
 
     def action_delete_selected(self):
         """Delete the selected todo item"""
-        if self.todo_items and self.selected_index < len(self.todo_items):
-            item = self.todo_items[self.selected_index]
-            # Find and remove from todos list
-            for i, todo in enumerate(self.todos):
-                if todo["text"] == item.text:
-                    self.todos.pop(i)
-                    break
-
-            # Remove from UI
-            item.remove()
-            self.todo_items.pop(self.selected_index)
-
-            # Adjust selection
-            if self.todo_items:
-                self.selected_index = min(self.selected_index, len(self.todo_items) - 1)
-                self.update_selection()
+        item = self._get_selected_item()
+        if item:
+            self._apply_operations([{"op": "delete", "id": item.todo_id}])
 
     def action_dismiss(self):
         """Save and dismiss the screen"""
-        # Update todos with current done states
-        for i, item in enumerate(self.todo_items):
-            if i < len(self.todos):
-                self.todos[i]["done"] = item.done
-
+        if self.refresh_timer:
+            self.refresh_timer.stop()
+            self.refresh_timer = None
         self.app.pop_screen()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button press"""
         if event.button.id == "done":
             self.action_dismiss()
+
+    def on_unmount(self):
+        """Ensure polling is stopped when the screen closes"""
+        if self.refresh_timer:
+            self.refresh_timer.stop()
+            self.refresh_timer = None
+
+    def refresh_from_server(self):
+        """Fetch the latest todos for the worktree from the server"""
+        client = getattr(self.app, "client", None)
+        if not client:
+            return
+
+        response = client.send_command({"cmd": "get_todos", "key": self.worktree_key})
+        if not response or response.get("status") != "ok":
+            return
+
+        new_version = response.get("version", 0)
+        todos = response.get("todos", [])
+
+        if new_version == self.version and todos == self.todos:
+            return
+
+        self.version = new_version
+        self.todos = todos
+        self._rebuild_todo_items()
+        if hasattr(self.app, "update_todo_cache"):
+            self.app.update_todo_cache(self.worktree_key, todos, new_version)
+
+    def _rebuild_todo_items(self):
+        """Re-render the todo list UI to match the current state"""
+        container = self.query_one("#todo-list")
+        container.remove_children()
+        self.todo_items = []
+        for todo in self.todos:
+            todo_id = todo.get("id", uuid.uuid4().hex)
+            # Ensure each todo has an id locally
+            todo.setdefault("id", todo_id)
+            item = TodoItem(todo_id, todo.get("text", ""), todo.get("done", False))
+            self.todo_items.append(item)
+            container.mount(item)
+
+        if self.todo_items:
+            self.selected_index = min(self.selected_index, len(self.todo_items) - 1)
+        else:
+            self.selected_index = 0
+        self.update_selection()
+
+    def _get_selected_item(self) -> Optional[TodoItem]:
+        """Return the currently selected todo item if available"""
+        if not self.todo_items:
+            return None
+        if self.selected_index < 0 or self.selected_index >= len(self.todo_items):
+            return None
+        return self.todo_items[self.selected_index]
+
+    def _apply_operations(self, operations: List[Dict]):
+        """Send an update request to the server and refresh local state"""
+        client = getattr(self.app, "client", None)
+        if not client or not operations:
+            return
+
+        payload = {
+            "cmd": "update_todos",
+            "key": self.worktree_key,
+            "operations": operations,
+            "version": self.version,
+        }
+
+        response = client.send_command(payload)
+        if not response:
+            self.app.notify("Failed to update todos", severity="error")
+            return
+
+        status = response.get("status")
+        if status == "conflict":
+            self.version = response.get("version", self.version)
+            self.todos = response.get("todos", self.todos)
+            self._rebuild_todo_items()
+            self.app.notify("Todo list changed on another client. Updated view.", severity="warning")
+            return
+        if status != "ok":
+            message = response.get("message", "Failed to update todos")
+            self.app.notify(message, severity="error")
+            return
+
+        self.version = response.get("version", self.version)
+        self.todos = response.get("todos", self.todos)
+        self._rebuild_todo_items()
+        if hasattr(self.app, "update_todo_cache"):
+            self.app.update_todo_cache(self.worktree_key, self.todos, self.version)
 
 
 class ContxtTUI(App):
@@ -659,8 +743,8 @@ class ContxtTUI(App):
         self.worktree_items: List[WorktreeItem] = []
         self.selected_index = 0
         self.update_timer = None
-        self.todos_file = Path.home() / "worktrees" / ".contxt_todos.json"
-        self.todos: Dict[str, List[Dict]] = self.load_todos()
+        self.todos: Dict[str, List[Dict]] = {}
+        self.todo_versions: Dict[str, int] = {}
         self.order_file = Path.home() / "worktrees" / ".contxt_order.json"
         self.custom_order: List[str] = self.load_order()
         # Track screen content hashes for status detection
@@ -674,21 +758,38 @@ class ContxtTUI(App):
             pass  # Will be populated dynamically
         yield Footer()
 
-    def load_todos(self) -> Dict[str, List[Dict]]:
-        """Load todos from file"""
-        if self.todos_file.exists():
-            try:
-                with open(self.todos_file, 'r') as f:
-                    return json.load(f)
-            except json.JSONDecodeError:
-                return {}
-        return {}
+    def refresh_all_todos(self):
+        """Fetch the latest todo data from the server and update the local cache."""
+        if not self.client:
+            return
 
-    def save_todos(self):
-        """Save todos to file"""
-        self.todos_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.todos_file, 'w') as f:
-            json.dump(self.todos, f, indent=2)
+        response = self.client.send_command({"cmd": "get_todos"})
+        if not response or response.get("status") != "ok":
+            return
+
+        raw_todos = response.get("todos", {})
+        versions = response.get("versions", {})
+
+        cleaned: Dict[str, List[Dict]] = {}
+        for key, todo_list in raw_todos.items():
+            if not isinstance(todo_list, list):
+                continue
+            cleaned[key] = []
+            for todo in todo_list:
+                if isinstance(todo, dict):
+                    cleaned[key].append(todo.copy())
+
+        self.todos = cleaned
+        self.todo_versions = {k: versions.get(k, 0) for k in cleaned.keys()}
+
+    def poll_todos(self):
+        """Periodic poll to keep todos cache in sync with the server."""
+        self.refresh_all_todos()
+
+    def update_todo_cache(self, key: str, todos: List[Dict], version: int):
+        """Update the cached todos for a specific worktree."""
+        self.todos[key] = [todo.copy() for todo in todos if isinstance(todo, dict)]
+        self.todo_versions[key] = version
 
     def load_order(self) -> List[str]:
         """Load custom order from file"""
@@ -717,11 +818,14 @@ class ContxtTUI(App):
             self.exit()
             return
 
+        # Fetch initial todos and worktrees
+        self.refresh_all_todos()
         # Load and display worktrees
         self.refresh_worktrees()
 
         # Start update timer
         self.set_interval(1.0, self.update_worktree_status)
+        self.set_interval(2.0, self.poll_todos)
 
     def refresh_worktrees(self):
         """Refresh the list of worktrees and their agent sessions"""
@@ -1078,14 +1182,9 @@ class ContxtTUI(App):
         worktree = item.worktree
         key = worktree["key"]
 
-        # Get or create todos for this worktree
-        if key not in self.todos:
-            self.todos[key] = []
-
-        # Show todo list screen
-        self.push_screen(TodoListScreen(key, self.todos[key]))
-        # Save todos when returning from the screen
-        self.save_todos()
+        cached_todos = self.todos.get(key, [])
+        cached_version = self.todo_versions.get(key, 0)
+        self.push_screen(TodoListScreen(key, cached_todos, cached_version))
 
     def _agent_requires_shell_on_exit(self, agent_cmd: str) -> bool:
         """Determine if the agent should leave an interactive shell running after exit."""
