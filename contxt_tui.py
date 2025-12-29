@@ -20,7 +20,13 @@ from typing import Optional, Dict, List, Callable
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Vertical, Horizontal, ScrollableContainer, VerticalScroll
+from textual.containers import (
+    Container,
+    Vertical,
+    Horizontal,
+    HorizontalScroll,
+    ScrollableContainer,
+)
 from textual.widgets import Header, Footer, Static, Label, Button, Input, Select, DataTable, Checkbox
 from textual.screen import Screen, ModalScreen
 from textual import events
@@ -610,10 +616,30 @@ class ContxtTUI(App):
         background: $surface;
     }
 
-    #worktree-list {
+    #worktree-scroll {
         height: 100%;
         border: solid $primary;
         padding: 1;
+    }
+
+    #worktree-columns {
+        height: 100%;
+        min-width: 100%;
+        align: left top;
+        layout: horizontal;
+    }
+
+    .worktree-column {
+        min-width: 48;
+        padding: 0 1;
+        margin-right: 1;
+    }
+
+    .column-separator {
+        width: 1;
+        height: 100%;
+        background: $primary-darken-3;
+        opacity: 0.6;
     }
 
     WorktreeItem {
@@ -729,6 +755,10 @@ class ContxtTUI(App):
         Binding("down,j", "cursor_down", "Down", show=False),
         Binding("ctrl+p", "cursor_up", "Up (Emacs)", show=False),
         Binding("ctrl+n", "cursor_down", "Down (Emacs)", show=False),
+        Binding("left,h", "cursor_left", "Left", show=False),
+        Binding("right,l", "cursor_right", "Right", show=False),
+        Binding("ctrl+b", "cursor_left", "Left (Emacs)", show=False),
+        Binding("ctrl+f", "cursor_right", "Right (Emacs)", show=False),
         Binding("tab", "cursor_down", "Next", show=False),
         Binding("shift+tab", "cursor_up", "Previous", show=False),
         Binding("shift+up,K", "move_item_up", "Move Item Up", show=False),
@@ -747,6 +777,7 @@ class ContxtTUI(App):
         self.todo_versions: Dict[str, int] = {}
         self.order_file = Path.home() / "worktrees" / ".contxt_order.json"
         self.custom_order: List[str] = self.load_order()
+        self.rows_per_column = 0
         # Track screen content hashes for status detection
         self.screen_hashes: Dict[str, str] = {}
         self.screen_stable_since: Dict[str, float] = {}
@@ -754,9 +785,14 @@ class ContxtTUI(App):
     def compose(self) -> ComposeResult:
         """Create the layout"""
         yield Header()
-        with VerticalScroll(id="worktree-list"):
-            pass  # Will be populated dynamically
+        with HorizontalScroll(id="worktree-scroll"):
+            with Horizontal(id="worktree-columns"):
+                pass  # Will be populated dynamically
         yield Footer()
+
+    def on_resize(self, event: events.Resize) -> None:
+        """Reflow columns when the terminal size changes."""
+        self.set_timer(0, self._layout_worktree_items)
 
     def refresh_all_todos(self):
         """Fetch the latest todo data from the server and update the local cache."""
@@ -842,8 +878,6 @@ class ContxtTUI(App):
         if self.worktree_items and 0 <= self.selected_index < len(self.worktree_items):
             selected_key = self.worktree_items[self.selected_index].worktree["key"]
 
-        container = self.query_one("#worktree-list")
-        container.remove_children()
         new_items: List[WorktreeItem] = []
 
         # Get all screen sessions if using multiplexer
@@ -900,6 +934,7 @@ class ContxtTUI(App):
             self.worktree_items = []
             self.custom_order = []
             self.selected_index = 0
+            self._layout_worktree_items()
             return
 
         self._update_custom_order(new_items)
@@ -915,9 +950,7 @@ class ContxtTUI(App):
         else:
             self.selected_index = min(self.selected_index, len(self.worktree_items) - 1)
 
-        for idx, item in enumerate(self.worktree_items):
-            item.set_selected(idx == self.selected_index)
-            container.mount(item)
+        self._layout_worktree_items()
 
     def update_worktree_status(self):
         """Update the status and output of all worktrees"""
@@ -1094,30 +1127,74 @@ class ContxtTUI(App):
         order_index = {key: idx for idx, key in enumerate(self.custom_order)}
         return sorted(items, key=lambda item: order_index.get(item.worktree["key"], len(order_index)))
 
-    def _remount_worktree_items(self):
-        """Re-render the worktree list to reflect any ordering changes."""
-        container = self.query_one("#worktree-list")
-        # Get current children in container
-        current_children = list(container.children)
+    def _get_available_height(self) -> int:
+        """Estimate the vertical space available for listing worktrees."""
+        height = self.size.height or 0
+        try:
+            header = self.query_one(Header)
+            footer = self.query_one(Footer)
+            height -= (header.size.height or 0)
+            height -= (footer.size.height or 0)
+        except Exception:
+            height -= 2
+        return max(1, height - 2)
 
-        # Reorder children in the DOM to match worktree_items order
+    def _calculate_rows_per_column(self) -> int:
+        """Determine how many worktrees fit vertically in the current viewport."""
+        preview_lines = self.config.get("preview_lines", 1)
+        item_height = max(1, preview_lines + 2)
+        available_height = self._get_available_height()
+        rows = max(1, available_height // item_height)
+        return rows
+
+    def _layout_worktree_items(self):
+        """Arrange worktree items into horizontal columns."""
+        try:
+            container = self.query_one("#worktree-columns", Horizontal)
+        except Exception:
+            return
+
+        container.remove_children()
+
+        if not self.worktree_items:
+            self.rows_per_column = 0
+            return
+
+        rows_per_column = self._calculate_rows_per_column()
+        self.rows_per_column = max(1, rows_per_column)
+
+        current_column = None
         for idx, item in enumerate(self.worktree_items):
-            current_pos = current_children.index(item)
-            if current_pos != idx:
-                # Move this child to the correct position
-                if idx == 0:
-                    container.move_child(item, before=current_children[0])
-                else:
-                    container.move_child(item, after=self.worktree_items[idx - 1])
-                # Update our tracking of current positions
-                current_children.remove(item)
-                current_children.insert(idx, item)
+            if idx % self.rows_per_column == 0:
+                if idx > 0:
+                    container.mount(Static("", classes="column-separator"))
+                current_column = Vertical(classes="worktree-column")
+                container.mount(current_column)
             item.set_selected(idx == self.selected_index)
+            if current_column is not None:
+                current_column.mount(item)
+        self._scroll_selected_into_view()
+
+    def _scroll_selected_into_view(self):
+        """Ensure the currently selected item is visible in the scroll viewport."""
+        if not self.worktree_items:
+            return
+        try:
+            scroll = self.query_one("#worktree-scroll", HorizontalScroll)
+        except Exception:
+            return
+        if 0 <= self.selected_index < len(self.worktree_items):
+            scroll.scroll_to_widget(self.worktree_items[self.selected_index], animate=False)
+
+    def _remount_worktree_items(self):
+        """Rebuild the visual layout to reflect ordering changes."""
+        self._layout_worktree_items()
 
     def update_selection(self):
         """Update which item is selected"""
         for i, item in enumerate(self.worktree_items):
             item.set_selected(i == self.selected_index)
+        self._scroll_selected_into_view()
 
     def _move_selected_item(self, delta: int):
         """Reorder the selected worktree by the specified offset."""
@@ -1135,6 +1212,15 @@ class ContxtTUI(App):
         self.custom_order = [item.worktree["key"] for item in self.worktree_items]
         self.save_order()
         self._remount_worktree_items()
+        self.update_selection()
+
+    def _jump_columns(self, delta_columns: int):
+        """Move the selection horizontally between columns."""
+        if not self.worktree_items:
+            return
+        span = self.rows_per_column if self.rows_per_column > 0 else max(1, len(self.worktree_items))
+        offset = delta_columns * span
+        self.selected_index = (self.selected_index + offset) % len(self.worktree_items)
         self.update_selection()
 
     def action_move_item_up(self):
@@ -1164,6 +1250,14 @@ class ContxtTUI(App):
         if self.worktree_items:
             self.selected_index = (self.selected_index + 1) % len(self.worktree_items)
             self.update_selection()
+
+    def action_cursor_left(self):
+        """Move selection to the previous column"""
+        self._jump_columns(-1)
+
+    def action_cursor_right(self):
+        """Move selection to the next column"""
+        self._jump_columns(1)
 
     def action_help(self):
         """Show help screen"""
