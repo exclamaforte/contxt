@@ -1,18 +1,226 @@
-checking contxt-tailscale-repro-claude
+checking contxt-olympus-ttl-claude
 session not found
-checking contxt-tailscale-foo-claude
+checking contxt-olympus-smol_test-claude
+session not found
+checking contxt-olympus-kernels-claude
+session not found
+checking contxt-olympus-subnode-claude
+session not found
+checking contxt-olympus-cross-claude
+session not found
+checking contxt-olympus-ttl3-claude
+session not found
+checking contxt-olympus-ruff-improvements-claude
+session not found
+checking contxt-olympus-dmesg-claude
+session not found
+checking contxt-olympus-sampler_configs-claude
+session not found
+checking contxt-olympus-drombench-claude
+session not found
+checking contxt-olympus-metrics-cli-claude
+session not found
+checking contxt-olympus-normalization-claude
+session not found
+checking contxt-olympus-node-state-claude
+session not found
+checking contxt-olympus-crusoe2-claude
+session not found
+checking contxt-olympus-cudnn-latest-claude
+session not found
+checking contxt-olympus-mcp-setup-claude
+session not found
+checking contxt-nv-reflection-megatron-cudagraphs-claude
+session not found
+checking contxt-nv-reflection-megatron-mathesis-benchmarking-claude
+session not found
+checking contxt-olympus-cross2-claude
+session not found
+checking contxt-olympus-crusoe-cpu-bringup-claude
+session not found
+checking contxt-olympus-crusoe10-claude
 saving screen
 screen read
 hashing screen
-current hash 86a4fb46a1ac00454da11f16f1c1ca09
+current hash 6b309ffbdbde477d1249ad943c27bfd8
 screen hashed
-prev hash 86a4fb46a1ac00454da11f16f1c1ca09
+prev hash 6b309ffbdbde477d1249ad943c27bfd8
 status idle
-checking contxt-tailscale-codex-claude
-saving screen
-screen read
-hashing screen
-current hash 078c53a48352b422c966e09077feb90d
-screen hashed
-prev hash 078c53a48352b422c966e09077feb90d
-status idle
+checking contxt-olympus-crusoe3-claude
+session not found
+checking contxt-olympus-crusoe4-claude
+session not found
+checking contxt-olympus-crusoe5-claude
+session not found
+checking contxt-olympus-crusoe6-claude
+session not found
+checking contxt-olympus-crusoe7-claude
+session not found
+checking contxt-olympus-crusoe8-claude
+session not found
+checking contxt-olympus-crusoe9-claude
+session not found
+checking contxt-olympus-cuda-harmful-envvars-claude
+session not found
+checking contxt-olympus-del-claude
+session not found
+checking contxt-olympus-devpod-claude
+session not found
+checking contxt-olympus-disk-free-space-claude
+session not found
+checking contxt-olympus-disk-hw-failures-claude
+session not found
+checking contxt-olympus-dmesg-soft-lockup-claude
+session not found
+checking contxt-olympus-ecc-error-counts-claude
+session not found
+checking contxt-olympus-ergatos-daemon-claude
+session not found
+checking contxt-olympus-ergatos-manual-claude
+session not found
+checking contxt-olympus-file-descriptor-usage-claude
+session not found
+checking contxt-olympus-fix-critical-invariant-names-claude
+session not found
+checking contxt-olympus-fixlnixl-claude
+session not found
+checking contxt-olympus-frontend-claude
+session not found
+checking contxt-olympus-fuse-congestion-claude
+session not found
+checking contxt-olympus-gb200-claude
+session not found
+checking contxt-olympus-gcp-claude
+session not found
+checking contxt-olympus-gmi-crusoe-claude
+session not found
+checking contxt-olympus-gpu-count-enforcement-claude
+session not found
+checking contxt-olympus-gpud-claude
+session not found
+checking contxt-olympus-h200-claude
+session not found
+checking contxt-olympus-hbm-temperature-claude
+session not found
+checking contxt-olympus-hw-slowdown-detection-claude
+session not found
+checking contxt-olympus-ib-dmesg-hw-events-claude
+session not found
+checking contxt-olympus-ib-drop-flap-tracking-claude
+session not found
+checking contxt-olympus-image-claude
+session not found
+checking contxt-olympus-kernel-panic-detection-claude
+session not found
+checking contxt-olympus-kube-claude
+session not found
+checking contxt-olympus-kubelet-health-claude
+session not found
+checking contxt-olympus-load-averages-claude
+session not found
+checking contxt-olympus-main-claude
+session not found
+checking contxt-olympus-main2-claude
+session not found
+checking contxt-olympus-mathesis-git-hash-claude
+session not found
+checking contxt-olympus-moe-router-claude
+session not found
+checking contxt-olympus-nccl-segfault-detection-claude
+session not found
+checking contxt-olympus-network-egress-latency-claude
+session not found
+checking contxt-olympus-ns3-claude
+session not found
+checking contxt-olympus-nvlink-error-counters-claude
+session not found
+checking contxt-olympus-oom-claude
+session not found
+checking contxt-olympus-oom-detection-claude
+session not found
+checking contxt-olympus-opti-crusoe-claude
+session not found
+checking contxt-olympus-pci-acs-check-claude
+session not found
+checking contxt-olympus-pid-count-claude
+session not found
+checking contxt-olympus-powercli-claude
+session not found
+checking contxt-olympus-powervirus-claude
+session not found
+checking contxt-olympus-pr-20073-te-test-suite-tests-claude
+session not found
+checking contxt-olympus-pr-20788-network-whackamole-claude
+session not found
+checking contxt-olympus-pr-21162-nvshmem-claude
+session not found
+checking contxt-olympus-pr-21163-crusoe-storage-claude
+session not found
+checking contxt-olympus-pr-21164-tui-raid0-claude
+session not found
+checking contxt-olympus-pr-21165-rolling-claude
+session not found
+checking contxt-olympus-pr-21467-update-nvshmem-install-claude
+session not found
+checking contxt-olympus-pr-21470-upds-02-claude
+session not found
+checking contxt-olympus-pr-21471-upds-03-claude
+session not found
+checking contxt-olympus-pr-21802-ergatos-gdrcopy-updates-claude
+session not found
+checking contxt-olympus-pr-23113-interviewqs-claude
+session not found
+checking contxt-olympus-pr-23155-ergatos-crusoe-pv-delete-before-replace-claude
+session not found
+checking contxt-olympus-pr-23238-ergatos-rolling-tui-overhaul-claude
+session not found
+checking contxt-olympus-pr-23367-ergatos-debug-pod-execution-mode-claude
+session not found
+checking contxt-olympus-pr-23543-fix-critical-invariant-names-claude
+session not found
+checking contxt-olympus-pr-23544-expand-daemon-probes-and-critical-configs-claude
+session not found
+checking contxt-olympus-pr-23545-iommu-kernel-version-invariants-claude
+session not found
+checking contxt-olympus-pr-23546-gpu-module-type-peermem-conflict-claude
+session not found
+checking contxt-olympus-pr-23890-ergatos-debug-pod-improvements-claude
+session not found
+checking contxt-olympus-pr-23891-ergatos-kernel-module-invariants-claude
+session not found
+checking contxt-olympus-pr-23929-ergatos-grpc-remediation-server-claude
+session not found
+checking contxt-olympus-pr-23940-ergatos-1-probe-annotations-claude
+session not found
+checking contxt-olympus-pr-23941-ergatos-2-gpu-runtime-health-claude
+session not found
+checking contxt-olympus-pr-23942-ergatos-3-frontend-probes-claude
+session not found
+checking contxt-olympus-pr-23943-ergatos-4-frontend-runtime-health-claude
+session not found
+checking contxt-olympus-pr-23944-ergatos-5-health-filters-claude
+session not found
+checking contxt-olympus-pr-23945-ergatos-6-frontend-filters-claude
+session not found
+checking contxt-olympus-pr-23946-ergatos-7-overview-health-counts-claude
+session not found
+checking contxt-olympus-qwen30b-claude
+session not found
+checking contxt-olympus-rollout-claude
+session not found
+checking contxt-olympus-rollout2-claude
+session not found
+checking contxt-olympus-sre-claude
+session not found
+checking contxt-olympus-sxid-detection-claude
+session not found
+checking contxt-olympus-tailscale-health-claude
+session not found
+checking contxt-olympus-te-test-suite-claude
+session not found
+checking contxt-olympus-utilization-invariant-claude
+session not found
+checking contxt-olympus-xid-broad-detection-claude
+session not found
+checking contxt-olympus-zombie-processes-claude
+session not found

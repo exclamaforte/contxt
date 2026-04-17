@@ -55,6 +55,34 @@ class ContxtManager:
             print("Error: Not in a git repository", file=sys.stderr)
             sys.exit(1)
 
+    def _resolve_primary_root(self, git_root: Path) -> Path:
+        """
+        Resolve the primary (main) worktree root for a repository.
+        If the current root is a linked worktree, this returns the main worktree root.
+        """
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(git_root),
+                    "rev-parse",
+                    "--path-format=absolute",
+                    "--git-common-dir",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            common_dir = Path(result.stdout.strip())
+            if common_dir.name == ".git":
+                primary_root = common_dir.parent
+                if primary_root.exists():
+                    return primary_root
+        except subprocess.CalledProcessError:
+            pass
+        return git_root
+
     def _get_git_name(self, git_root: Optional[Path] = None) -> str:
         """Get the name of the git repository"""
         if git_root is None:
@@ -87,8 +115,44 @@ class ContxtManager:
         except subprocess.CalledProcessError:
             return "main"
 
+    def _get_default_base_ref(self, git_root: Path) -> str:
+        """Pick a stable base ref for new worktrees (prefer origin/main)."""
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(git_root),
+                    "symbolic-ref",
+                    "refs/remotes/origin/HEAD",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            base_ref = result.stdout.strip()
+            if base_ref:
+                return base_ref
+        except subprocess.CalledProcessError:
+            pass
+
+        for branch in ["origin/main", "origin/master", "main", "master"]:
+            result = subprocess.run(
+                ["git", "-C", str(git_root), "rev-parse", "--verify", branch],
+                capture_output=True,
+            )
+            if result.returncode == 0:
+                return branch
+
+        return "HEAD"
+
     def _create_worktree_common(
-        self, name: str, project: Optional[str] = None
+        self,
+        name: str,
+        project: Optional[str] = None,
+        repo_root: Optional[Path] = None,
+        branch_name: Optional[str] = None,
+        base_ref: Optional[str] = None,
     ) -> Tuple[str, Path, Path, str]:
         """
         Common logic for creating a worktree with venv.
@@ -98,7 +162,10 @@ class ContxtManager:
         cwd = Path.cwd()
         worktree_info_tuple = self._find_worktree_info(cwd)
 
-        if worktree_info_tuple and not project:
+        if repo_root is not None:
+            git_root = self._resolve_primary_root(Path(repo_root))
+            git_name = project if project else self._get_git_name(git_root)
+        elif worktree_info_tuple and not project:
             # We're in a worktree, resolve to original repo root
             git_name_from_worktree, current_worktree_name = worktree_info_tuple
             git_root = Path(
@@ -110,7 +177,10 @@ class ContxtManager:
         else:
             # Not in a worktree or project explicitly specified
             git_root = self._get_git_root()
+            git_root = self._resolve_primary_root(git_root)
             git_name = project if project else self._get_git_name(git_root)
+
+        git_root = self._resolve_primary_root(git_root)
 
         # Create worktree directory structure
         worktree_parent = self.worktrees_base / git_name
@@ -126,21 +196,42 @@ class ContxtManager:
         worktree_parent.mkdir(parents=True, exist_ok=True)
 
         # Create git worktree with new branch
-        branch_name = f"worktree/{name}"
+        branch_name = branch_name or f"worktree/{name}"
+        base_ref = base_ref or self._get_default_base_ref(git_root)
+        branch_exists = subprocess.run(
+            ["git", "-C", str(git_root), "show-ref", "--verify", f"refs/heads/{branch_name}"],
+            capture_output=True,
+        ).returncode == 0
         try:
-            subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(git_root),
-                    "worktree",
-                    "add",
-                    "-b",
-                    branch_name,
-                    str(worktree_path),
-                ],
-                check=True,
-            )
+            if branch_exists:
+                subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(git_root),
+                        "worktree",
+                        "add",
+                        str(worktree_path),
+                        branch_name,
+                    ],
+                    check=True,
+                )
+            else:
+                subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(git_root),
+                        "worktree",
+                        "add",
+                        "--no-track",
+                        "-b",
+                        branch_name,
+                        str(worktree_path),
+                        base_ref,
+                    ],
+                    check=True,
+                )
         except subprocess.CalledProcessError as e:
             print(f"Error creating worktree: {e}", file=sys.stderr)
             sys.exit(1)
@@ -175,24 +266,37 @@ class ContxtManager:
 
         return (git_name, worktree_path, venv_path, branch_name)
 
-    def create(self, name: str, project: Optional[str] = None):
+    def create(
+        self,
+        name: str,
+        project: Optional[str] = None,
+        repo_root: Optional[str] = None,
+        branch_name: Optional[str] = None,
+        base_ref: Optional[str] = None,
+        open_editor: bool = True,
+    ):
         """Create a new worktree with venv"""
         # Use common worktree creation logic
         git_name, worktree_path, venv_path, branch_name = self._create_worktree_common(
-            name, project
+            name,
+            project,
+            Path(repo_root) if repo_root else None,
+            branch_name,
+            base_ref,
         )
 
         # Open in VS Code
-        try:
-            subprocess.run(["code", str(worktree_path)], check=True)
-            print(f"\nOpened '{name}' in VS Code")
-        except subprocess.CalledProcessError as e:
-            print(f"\nWarning: Failed to open VS Code: {e}", file=sys.stderr)
-        except FileNotFoundError:
-            print(
-                "\nWarning: 'code' command not found. Install VS Code CLI to auto-open.",
-                file=sys.stderr,
-            )
+        if open_editor:
+            try:
+                subprocess.run(["code", str(worktree_path)], check=True)
+                print(f"\nOpened '{name}' in VS Code")
+            except subprocess.CalledProcessError as e:
+                print(f"\nWarning: Failed to open VS Code: {e}", file=sys.stderr)
+            except FileNotFoundError:
+                print(
+                    "\nWarning: 'code' command not found. Install VS Code CLI to auto-open.",
+                    file=sys.stderr,
+                )
 
     def edit(self, name: str, project: Optional[str] = None):
         """Open worktree in VS Code"""
@@ -244,32 +348,7 @@ class ContxtManager:
 
     def delete(self, name: str, project: Optional[str] = None):
         """Delete a worktree by moving it to /tmp"""
-        # Check if we're in a worktree and use its git_name
-        cwd = Path.cwd()
-        worktree_info_tuple = self._find_worktree_info(cwd)
-
-        if project:
-            git_name = project
-        elif worktree_info_tuple:
-            git_name, _ = worktree_info_tuple
-        else:
-            try:
-                git_name = self._get_git_name()
-            except SystemExit:
-                print(
-                    "Error: Not in a git repository. Use -p to specify project.",
-                    file=sys.stderr,
-                )
-                sys.exit(1)
-
-        if git_name not in self.metadata or name not in self.metadata[git_name]:
-            print(
-                f"Error: Worktree '{name}' not found for project '{git_name}'",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-
-        worktree_info = self.metadata[git_name][name]
+        git_name, worktree_info = self._resolve_worktree_for_delete(name, project)
         worktree_path = Path(worktree_info["worktree_path"])
         original_repo = worktree_info["original_repo"]
         branch_name = worktree_info["branch"]
@@ -324,6 +403,72 @@ class ContxtManager:
         self._save_metadata()
 
         print(f"Deleted worktree '{name}' from project '{git_name}'")
+
+    def _resolve_worktree_for_delete(self, name: str, project: Optional[str] = None) -> Tuple[str, Dict]:
+        cwd = Path.cwd()
+        worktree_info_tuple = self._find_worktree_info(cwd)
+
+        if project:
+            git_name = project
+        elif worktree_info_tuple:
+            git_name, _ = worktree_info_tuple
+        else:
+            try:
+                git_name = self._get_git_name()
+            except SystemExit:
+                print(
+                    "Error: Not in a git repository. Use -p to specify project.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+        if git_name not in self.metadata or name not in self.metadata[git_name]:
+            print(
+                f"Error: Worktree '{name}' not found for project '{git_name}'",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return git_name, self.metadata[git_name][name]
+
+    def get_delete_preflight(self, name: str, project: Optional[str] = None) -> Dict:
+        git_name, worktree_info = self._resolve_worktree_for_delete(name, project)
+        worktree_path = Path(worktree_info["worktree_path"])
+        status_lines: List[str] = []
+        if worktree_path.exists():
+            try:
+                result = subprocess.run(
+                    ["git", "-C", str(worktree_path), "status", "--short"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                status_lines = [line.rstrip() for line in result.stdout.splitlines() if line.strip()]
+            except subprocess.CalledProcessError:
+                status_lines = []
+        return {
+            "project": git_name,
+            "name": name,
+            "worktree_path": str(worktree_path),
+            "has_changes": bool(status_lines),
+            "status_lines": status_lines,
+        }
+
+    def confirm_delete_if_needed(self, name: str, project: Optional[str] = None, force: bool = False) -> None:
+        preflight = self.get_delete_preflight(name, project)
+        if force or not preflight["has_changes"]:
+            return
+        print(
+            f"Worktree '{preflight['name']}' has staged/unstaged changes:",
+            file=sys.stderr,
+        )
+        for line in preflight["status_lines"][:20]:
+            print(f"  {line}", file=sys.stderr)
+        if len(preflight["status_lines"]) > 20:
+            print(f"  ... and {len(preflight['status_lines']) - 20} more", file=sys.stderr)
+        response = input("Delete anyway? [y/N] ").strip().lower()
+        if response not in {"y", "yes"}:
+            print("Delete cancelled.", file=sys.stderr)
+            sys.exit(1)
 
     def list(self, project: Optional[str] = None):
         """List all worktrees"""
@@ -469,6 +614,12 @@ def main():
 
     # tui command (can be explicit, but also default)
     tui_parser = subparsers.add_parser("tui", help="Launch TUI interface")
+    review_parser = subparsers.add_parser(
+        "review", help="Launch the async PR review dashboard"
+    )
+    review_server_parser = subparsers.add_parser(
+        "review-server", help="Run the async PR review server"
+    )
 
     # create command
     create_parser = subparsers.add_parser(
@@ -477,6 +628,18 @@ def main():
     create_parser.add_argument("name", help="Name of the worktree")
     create_parser.add_argument(
         "-p", "--project", help="Project name (defaults to current git repo name)"
+    )
+    create_parser.add_argument(
+        "--repo-root", help="Path to the primary git repo to create the worktree from"
+    )
+    create_parser.add_argument(
+        "--branch", help="Branch name to create or attach the worktree to"
+    )
+    create_parser.add_argument(
+        "--base-ref", help="Base ref to branch from when creating a new branch"
+    )
+    create_parser.add_argument(
+        "--no-open", action="store_true", help="Do not open the created worktree in VS Code"
     )
 
     # edit command
@@ -490,6 +653,14 @@ def main():
     delete_parser = subparsers.add_parser("delete", help="Delete a worktree")
     delete_parser.add_argument("name", help="Name of the worktree")
     delete_parser.add_argument(
+        "-p", "--project", help="Project name (defaults to current git repo name)"
+    )
+    delete_parser.add_argument(
+        "-y", "--yes", action="store_true", help="Delete without confirmation even if there are changes"
+    )
+    delete_check_parser = subparsers.add_parser("delete-check", help="Inspect whether deleting a worktree needs confirmation")
+    delete_check_parser.add_argument("name", help="Name of the worktree")
+    delete_check_parser.add_argument(
         "-p", "--project", help="Project name (defaults to current git repo name)"
     )
 
@@ -534,16 +705,43 @@ def main():
             print("Make sure textual is installed: pip install textual", file=sys.stderr)
             sys.exit(1)
         return
+    if args.command == "review":
+        try:
+            from contxt_review_tui import main as review_tui_main
+            review_tui_main()
+        except ImportError as e:
+            print(f"Error: Failed to import review TUI module: {e}", file=sys.stderr)
+            print("Make sure textual is installed: pip install textual", file=sys.stderr)
+            sys.exit(1)
+        return
+    if args.command == "review-server":
+        try:
+            from contxt_review_server import main as review_server_main
+            review_server_main()
+        except ImportError as e:
+            print(f"Error: Failed to import review server module: {e}", file=sys.stderr)
+            sys.exit(1)
+        return
 
     # Handle other commands with ContxtManager
     manager = ContxtManager()
 
     if args.command == "create":
-        manager.create(args.name, args.project)
+        manager.create(
+            args.name,
+            args.project,
+            repo_root=args.repo_root,
+            branch_name=args.branch,
+            base_ref=args.base_ref,
+            open_editor=not args.no_open,
+        )
     elif args.command == "edit":
         manager.edit(args.name, args.project)
     elif args.command == "delete":
+        manager.confirm_delete_if_needed(args.name, args.project, force=args.yes)
         manager.delete(args.name, args.project)
+    elif args.command == "delete-check":
+        print(json.dumps(manager.get_delete_preflight(args.name, args.project)))
     elif args.command == "list":
         manager.list(args.project)
     elif args.command == "merge":

@@ -22,6 +22,19 @@ class ContxtConfig:
         "server_host": "localhost",
         "server_port": 9876,
         "socket_path": str(Path.home() / ".contxt" / "server.sock"),
+        "review_socket_path": str(Path.home() / ".contxt" / "review.sock"),
+        "review_state_path": str(Path.home() / ".contxt" / "review_state.json"),
+        "review_snapshot_path": str(Path.home() / ".contxt" / "review_snapshot.json"),
+        "review_log_path": str(Path.home() / ".contxt" / "review.log"),
+        "review_poll_seconds": 90,
+        "review_worktree_poll_seconds": 30,
+        "review_dispatch_seconds": 10,
+        "review_auto_dispatch_agents": True,
+        "review_agent_command": "claude",
+        "review_agent_authors": ["reflection-agent", "devin-ai-integration"],
+        "session_backend": "auto",
+        "review_session_prefix": "contxt-review",
+        "review_repo_cache_path": str(Path.home() / ".contxt" / "repos"),
     }
 
     def __init__(self):

@@ -792,7 +792,8 @@ class ContxtTUI(App):
 
     def on_resize(self, event: events.Resize) -> None:
         """Reflow columns when the terminal size changes."""
-        self.set_timer(0, self._layout_worktree_items)
+        # Textual 0.40+ rejects zero-interval timers during shutdown.
+        self.set_timer(0.01, self._layout_worktree_items)
 
     def refresh_all_todos(self):
         """Fetch the latest todo data from the server and update the local cache."""
@@ -1460,6 +1461,29 @@ class ContxtTUI(App):
         item = self.worktree_items[self.selected_index]
         worktree = item.worktree
 
+        preflight_process = subprocess.run(
+            [
+                "python3",
+                str(Path(__file__).parent / "contxt"),
+                "delete-check",
+                worktree["name"],
+                "-p",
+                worktree["git_name"],
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if preflight_process.returncode != 0:
+            self.notify(f"Failed to inspect {worktree['name']} before delete", severity="error")
+            return
+        preflight = json.loads(preflight_process.stdout)
+        message = f"Delete worktree {worktree['name']}?"
+        if preflight.get("has_changes"):
+            lines = preflight.get("status_lines", [])
+            preview = "\n".join(lines[:12])
+            suffix = f"\n... and {len(lines) - 12} more" if len(lines) > 12 else ""
+            message = f"{message}\n\nThis worktree has staged/unstaged changes:\n{preview}{suffix}"
+
         def do_delete():
             with App.suspend(self):
                 subprocess.call(
@@ -1470,13 +1494,12 @@ class ContxtTUI(App):
                         worktree["name"],
                         "-p",
                         worktree["git_name"],
+                        "--yes",
                     ]
                 )
             self.refresh_worktrees()
 
-        self.push_screen(
-            ConfirmDialog(f"Delete worktree {worktree['name']}?", on_confirm=do_delete)
-        )
+        self.push_screen(ConfirmDialog(message, on_confirm=do_delete))
 
     def action_merge_worktree(self):
         """Merge the selected worktree"""
